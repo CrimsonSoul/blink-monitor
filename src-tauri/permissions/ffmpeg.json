@@ -1,0 +1,12 @@
+{
+  "identifier": "allow-ffmpeg",
+  "description": "Allows spawning the ffmpeg sidecar",
+  "commands": [
+    "spawn"
+  ],
+  "scope": [
+    {
+      "sidecar": "binaries/ffmpeg"
+    }
+  ]
+}
