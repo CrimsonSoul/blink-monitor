@@ -18,6 +18,7 @@ use tokio_rustls::TlsConnector;
 use anyhow::{Result, anyhow};
 use url::Url;
 use bytes::{BytesMut, BufMut};
+use rustls::RootCertStore;
 
 #[derive(Debug)]
 struct NoCertificateVerification;
@@ -59,6 +60,41 @@ impl ServerCertVerifier for NoCertificateVerification {
     }
 }
 
+fn insecure_tls_enabled() -> bool {
+    std::env::var("BLINK_IMMI_INSECURE_TLS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+fn secure_only_enabled() -> bool {
+    std::env::var("BLINK_IMMI_SECURE_ONLY")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+fn build_tls_config(insecure: bool) -> Result<ClientConfig> {
+    let provider = rustls::crypto::aws_lc_rs::default_provider();
+
+    if insecure {
+        return Ok(ClientConfig::builder_with_provider(Arc::new(provider))
+            .with_safe_default_protocol_versions()?
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
+            .with_no_client_auth());
+    }
+
+    let mut roots = RootCertStore::empty();
+    let native = rustls_native_certs::load_native_certs();
+    for cert in native.certs {
+        roots.add(cert).map_err(|e| anyhow!("Failed to add native cert: {}", e))?;
+    }
+
+    Ok(ClientConfig::builder_with_provider(Arc::new(provider))
+        .with_safe_default_protocol_versions()?
+        .with_root_certificates(roots)
+        .with_no_client_auth())
+}
+
 pub struct ImmiStream {
     pub reader: tokio::io::ReadHalf<tokio_rustls::client::TlsStream<TcpStream>>,
     pub writer: tokio::io::WriteHalf<tokio_rustls::client::TlsStream<TcpStream>>,
@@ -83,20 +119,35 @@ impl ImmiStream {
             .and_then(|s| s.split("__").next())
             .ok_or(anyhow!("Could not extract connection ID"))?;
 
-        // TLS Setup with disabled verification
-        let provider = rustls::crypto::aws_lc_rs::default_provider();
-        let config = ClientConfig::builder_with_provider(Arc::new(provider))
-            .with_safe_default_protocol_versions()?
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
-            .with_no_client_auth();
-            
-        let connector = TlsConnector::from(Arc::new(config));
-        let stream = TcpStream::connect(format!("{}:{}", host, port)).await?;
         let domain = ServerName::try_from(host.to_string())
             .map_err(|_| anyhow!("Invalid DNS name"))?;
-            
-        let tls_stream = connector.connect(domain, stream).await?;
+
+        let tls_stream = if insecure_tls_enabled() {
+            if !cfg!(debug_assertions) {
+                return Err(anyhow!("Insecure TLS is only allowed in debug builds"));
+            }
+            let config = build_tls_config(true)?;
+            let connector = TlsConnector::from(Arc::new(config));
+            let stream = TcpStream::connect(format!("{}:{}", host, port)).await?;
+            connector.connect(domain, stream).await?
+        } else {
+            let config = build_tls_config(false)?;
+            let connector = TlsConnector::from(Arc::new(config));
+            let stream = TcpStream::connect(format!("{}:{}", host, port)).await?;
+            match connector.connect(domain.clone(), stream).await {
+                Ok(tls) => tls,
+                Err(e) => {
+                    if !cfg!(debug_assertions) || secure_only_enabled() {
+                        return Err(anyhow!("TLS verification failed: {}", e));
+                    }
+                    eprintln!("TLS verification failed in debug, falling back to insecure: {}", e);
+                    let fallback_config = build_tls_config(true)?;
+                    let fallback_connector = TlsConnector::from(Arc::new(fallback_config));
+                    let fallback_stream = TcpStream::connect(format!("{}:{}", host, port)).await?;
+                    fallback_connector.connect(domain, fallback_stream).await?
+                }
+            }
+        };
         let (reader, mut writer) = tokio::io::split(tls_stream);
 
         // Build the 122-byte authentication header matching reference blinkpy implementation

@@ -1,62 +1,90 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: "Space Grotesk", "Helvetica Neue", Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
+  color-scheme: dark;
+  color: #e6e9ef;
+  background-color: #0a0a0b;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --radius: 0.6rem;
+  --app-bg: #0a0a0b;
+  --app-surface: #0f1114;
+  --app-surface-2: #13161b;
+  --app-surface-3: #181d24;
+  --app-border: rgba(255, 255, 255, 0.06);
+  --app-text: #e6e9ef;
+  --app-muted: #8a909a;
+  --app-accent: #f59e0b;
+  --app-accent-strong: #fbbf24;
+  --app-accent-soft: rgba(245, 158, 11, 0.2);
+  --background: #0a0a0b;
+  --foreground: #e6e9ef;
+  --card: #0f1114;
+  --card-foreground: #e6e9ef;
+  --popover: #13161b;
+  --popover-foreground: #e6e9ef;
+  --primary: #f59e0b;
+  --primary-foreground: #0a0a0b;
+  --secondary: #13161b;
+  --secondary-foreground: #c9ced7;
+  --muted: #13161b;
+  --muted-foreground: #8a909a;
+  --accent: rgba(245, 158, 11, 0.2);
+  --accent-foreground: #e6e9ef;
+  --destructive: #ef4444;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: rgba(245, 158, 11, 0.45);
+  --sidebar: #0c0f13;
+  --sidebar-foreground: #c9ced7;
+  --sidebar-primary: #f59e0b;
+  --sidebar-primary-foreground: #0a0a0b;
+  --sidebar-accent: rgba(245, 158, 11, 0.2);
+  --sidebar-accent-foreground: #e6e9ef;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: rgba(245, 158, 11, 0.45);
 }
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
   min-width: 320px;
   min-height: 100vh;
   user-select: none;
+  background: var(--app-bg);
+  color: var(--app-text);
+}
+
+#root {
+  min-height: 100vh;
+  width: 100%;
+}
+
+.app-shell {
+  min-height: 100vh;
+  width: 100%;
+  background: linear-gradient(180deg, #0d1014 0%, #0a0a0b 65%, #0a0a0b 100%);
+  padding-top: env(titlebar-area-height, 0px);
+}
+
+.icon-chip {
+  background: var(--app-surface-2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--app-muted);
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.icon-chip:hover {
+  background: var(--app-surface-3);
+  color: #ffffff;
 }
 
 @theme {
