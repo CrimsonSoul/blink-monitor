@@ -1,5 +1,4 @@
-import { useRef, useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Bug } from "lucide-react";
 import mpegts from 'mpegts.js';
@@ -10,13 +9,31 @@ interface MpegtsPlayerProps {
   url: string;
   onStatusChange?: (status: string) => void;
   onStreamStarted?: () => void;
+  showControls?: boolean;
+  videoRef?: React.RefObject<HTMLVideoElement | null>;
+  wrapperRef?: React.RefObject<HTMLDivElement | null>;
+  fit?: "contain" | "cover";
 }
 
-export function MpegtsPlayer({ url, onStatusChange, onStreamStarted }: MpegtsPlayerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const wrapperRef = useRef<HTMLDivElement>(null);
+export function MpegtsPlayer({
+  url,
+  onStatusChange,
+  onStreamStarted,
+  showControls = true,
+  videoRef: externalVideoRef,
+  wrapperRef: externalWrapperRef,
+  fit = "contain"
+}: MpegtsPlayerProps) {
+  const internalVideoRef = useRef<HTMLVideoElement>(null);
+  const internalWrapperRef = useRef<HTMLDivElement>(null);
+  const videoRef = externalVideoRef ?? internalVideoRef;
+  const wrapperRef = externalWrapperRef ?? internalWrapperRef;
   const playerRef = useRef<mpegts.Player | null>(null);
   const startedRef = useRef(false);
+  const volumeRef = useRef(1);
+  const retryRef = useRef(0);
+  const retryTimerRef = useRef<number | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("Connecting...");
@@ -30,12 +47,34 @@ export function MpegtsPlayer({ url, onStatusChange, onStreamStarted }: MpegtsPla
     onStatusChange?.(newStatus);
   }, [onStatusChange]);
 
+  const effectiveUrl = useMemo(() => {
+    const joiner = url.includes("?") ? "&" : "?";
+    return `${url}${joiner}retry=${retryToken}`;
+  }, [url, retryToken]);
+
+  useEffect(() => {
+    startedRef.current = false;
+    retryRef.current = 0;
+    if (retryTimerRef.current) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    setLoading(true);
+    setError(null);
+    setStatus("Connecting...");
+  }, [effectiveUrl]);
+
   const markStarted = useCallback(() => {
     if (!startedRef.current) {
       startedRef.current = true;
+      setLoading(false);
       onStreamStarted?.();
     }
   }, [onStreamStarted]);
+
+  useEffect(() => {
+    volumeRef.current = volume;
+  }, [volume]);
 
   useEffect(() => {
     if (!videoRef.current) return;
@@ -48,7 +87,7 @@ export function MpegtsPlayer({ url, onStatusChange, onStreamStarted }: MpegtsPla
       const player = mpegts.createPlayer({
         type: 'mpegts',
         isLive: true,
-        url: url,
+        url: effectiveUrl,
         hasAudio: true,
         hasVideo: true,
       }, {
@@ -63,21 +102,34 @@ export function MpegtsPlayer({ url, onStatusChange, onStreamStarted }: MpegtsPla
 
       player.on(mpegts.Events.ERROR, (type, detail, info) => {
         console.error("mpegts error", type, detail, info);
-        setError(`Stream Error: ${type} (${detail})`);
+        const statusCode = info?.code ? ` ${info.code}` : "";
+        const statusMsg = info?.msg ? ` ${info.msg}` : "";
+        const message = `Stream Error: ${type} (${detail})${statusCode}${statusMsg}`;
+        setError(message);
         setLoading(false);
+
+        const shouldRetry = detail === "HttpStatusCodeInvalid" && typeof info?.code === "number" && info.code >= 500;
+        if (shouldRetry && retryRef.current < 3) {
+          retryRef.current += 1;
+          const delayMs = Math.min(2000 * retryRef.current, 8000);
+          updateStatus(`Stream unavailable (HTTP ${info.code}). Retrying in ${Math.round(delayMs / 1000)}s...`);
+          setLoading(true);
+          setError(null);
+          retryTimerRef.current = window.setTimeout(() => {
+            setRetryToken((t) => t + 1);
+          }, delayMs);
+        }
       });
 
       player.on(mpegts.Events.MEDIA_INFO, (info) => {
         console.log("Stream media info arrived", info);
         updateStatus("Stream metadata received, starting playback...");
-        markStarted();
         
         const playPromise = player.play();
         if (playPromise) {
           playPromise.then(() => {
             if (videoRef.current) {
-              videoRef.current.muted = false;
-              videoRef.current.volume = volume;
+              videoRef.current.volume = volumeRef.current;
             }
           }).catch((e: Error) => {
             console.warn("Play deferred, waiting for more data...", e);
@@ -86,33 +138,16 @@ export function MpegtsPlayer({ url, onStatusChange, onStreamStarted }: MpegtsPla
       });
 
       player.on(mpegts.Events.STATISTICS_INFO, () => {
+        setLoading(false);
         markStarted();
-        if (loading) {
-          setLoading(false);
-          if (videoRef.current?.paused) {
-            player.play()?.then(() => {
-              if (videoRef.current) {
-                videoRef.current.muted = false;
-                videoRef.current.volume = volume;
-              }
-            }).catch(() => {});
-          }
+        if (videoRef.current?.paused) {
+          player.play()?.then(() => {
+            if (videoRef.current) {
+              videoRef.current.volume = volumeRef.current;
+            }
+          }).catch(() => {});
         }
       });
-
-      const logInterval = setInterval(async () => {
-        if (loading) {
-          try {
-            const logs = await invoke<string[]>("get_ffmpeg_logs");
-            const lastLog = logs[logs.length - 1];
-            if (lastLog && (lastLog.includes("Busy") || lastLog.includes("Establishing") || lastLog.includes("handshake") || lastLog.includes("Connected") || lastLog.includes("started"))) {
-              updateStatus(lastLog);
-            }
-          } catch (e) {
-            console.error("Failed to fetch logs", e);
-          }
-        }
-      }, 1000);
 
       const timeout = setTimeout(() => {
         if (!startedRef.current) {
@@ -123,7 +158,10 @@ export function MpegtsPlayer({ url, onStatusChange, onStreamStarted }: MpegtsPla
 
       return () => {
         clearTimeout(timeout);
-        clearInterval(logInterval);
+        if (retryTimerRef.current) {
+          window.clearTimeout(retryTimerRef.current);
+          retryTimerRef.current = null;
+        }
         if (playerRef.current) {
           playerRef.current.destroy();
           playerRef.current = null;
@@ -132,7 +170,7 @@ export function MpegtsPlayer({ url, onStatusChange, onStreamStarted }: MpegtsPla
     } else {
       setError("MSE Live Playback not supported in this browser");
     }
-  }, [url, loading, markStarted, updateStatus, volume]);
+  }, [effectiveUrl, markStarted, updateStatus]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -141,37 +179,53 @@ export function MpegtsPlayer({ url, onStatusChange, onStreamStarted }: MpegtsPla
     const handleVolumeChange = () => {
       const newVolume = video.volume;
       setVolume(newVolume);
-      localStorage.setItem('blink_volume', newVolume.toString());
+      try {
+        localStorage.setItem('blink_volume', newVolume.toString());
+      } catch {}
+    };
+
+    const handlePlaying = () => {
+      updateStatus("Live stream connected");
+      markStarted();
     };
 
     video.addEventListener('volumechange', handleVolumeChange);
-    return () => video.removeEventListener('volumechange', handleVolumeChange);
+    video.addEventListener('playing', handlePlaying);
+    return () => {
+      video.removeEventListener('volumechange', handleVolumeChange);
+      video.removeEventListener('playing', handlePlaying);
+    };
+  }, [markStarted, updateStatus]);
+
+  const handleRetry = useCallback(() => {
+    setRetryToken((t) => t + 1);
   }, []);
 
   return (
     <div ref={wrapperRef} className="relative w-full h-full flex items-center justify-center bg-black group/player overflow-hidden">
       {loading && !error && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black">
-          <RefreshCw className="w-10 h-10 text-blue-500 animate-spin mb-4" />
-          <p className="text-sm font-medium text-white">{status}</p>
+          <RefreshCw className="w-10 h-10 text-[var(--app-accent)] animate-spin mb-4" />
+          <p className="text-sm font-medium text-white/90">{status}</p>
         </div>
       )}
       {error && (
         <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/80 px-10 text-center">
-          <div className="bg-red-500/20 p-4 rounded-full mb-4">
-             <Bug className="w-8 h-8 text-red-500" />
+          <div className="bg-[var(--app-accent)]/10 border border-[var(--app-accent)]/30 p-4 rounded-full mb-4">
+             <Bug className="w-8 h-8 text-[var(--app-accent)]" />
           </div>
           <p className="text-lg font-bold text-white mb-2">Livestream Error</p>
           <p className="text-sm text-slate-400 mb-6">{error}</p>
-          <Button onClick={() => window.location.reload()} className="bg-slate-800 hover:bg-slate-700 text-white">
-            Reload App
+          <Button onClick={handleRetry} className="bg-[var(--app-surface-3)] hover:bg-[var(--app-surface-2)] border border-white/10 text-white">
+            Retry Stream
           </Button>
         </div>
       )}
       <video 
         ref={videoRef} 
         className={cn(
-          "w-full h-full object-contain transition-opacity duration-700",
+          "w-full h-full transition-opacity duration-700",
+          fit === "cover" ? "object-cover" : "object-contain",
           loading ? "opacity-0" : "opacity-100"
         )}
         autoPlay
@@ -181,7 +235,7 @@ export function MpegtsPlayer({ url, onStatusChange, onStreamStarted }: MpegtsPla
         <track kind="captions" />
       </video>
 
-      {!loading && !error && (
+      {!loading && !error && showControls && (
         <VideoControls videoRef={videoRef} wrapperRef={wrapperRef} isLive={true} />
       )}
     </div>

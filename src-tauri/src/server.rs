@@ -14,7 +14,7 @@ use futures_util::StreamExt;
 use tower_http::cors::CorsLayer;
 use tokio_util::sync::CancellationToken;
 use http::Method;
-use chrono::Utc;
+use chrono::{Utc, Duration};
 
 #[derive(serde::Deserialize)]
 pub struct ProxyQuery {
@@ -84,7 +84,12 @@ async fn proxy_request_internal(
     // SSRF protection: only allow Blink domains
     if let Ok(parsed) = url::Url::parse(&req_url) {
         if let Some(host) = parsed.host_str() {
-            if !host.ends_with(".immedia-semi.com") && !host.ends_with(".amazonaws.com") {
+            if !host.ends_with(".immedia-semi.com")
+                && !host.ends_with(".blinkforhome.com")
+                && !host.ends_with(".blink.com")
+                && !host.ends_with(".amazonaws.com")
+                && !host.ends_with(".cloudfront.net")
+            {
                 return (StatusCode::BAD_REQUEST, format!("Invalid URL host: {}", host)).into_response();
             }
         } else {
@@ -330,15 +335,15 @@ async fn proxy_live(
         cleanup_token.cancelled().await;
         
         if !record {
-            let mut found = false;
-            // Wait for Blink to finalize the clip (usually takes 5-30s)
-            for attempt in 1..=5 {
-                let delay = if attempt == 1 { 5 } else { 10 };
+            // Wait for Blink to finalize the clip (can take up to ~90s in some cases)
+            let delays = [5u64, 10, 15, 20, 25, 30];
+            let search_after = session_start_time - Duration::seconds(60);
+            for delay in delays {
                 tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                 
                 let ids = {
                     let client = cleanup_client.lock().await;
-                    client.get_latest_media_for_camera(camera_id, session_start_time).await
+                    client.get_latest_media_for_camera(camera_id, search_after).await
                 };
 
                 match ids {
@@ -356,12 +361,11 @@ async fn proxy_live(
                             // Verify deletion by re-fetching
                             let verification = {
                                 let client = cleanup_client.lock().await;
-                                client.get_latest_media_for_camera(camera_id, session_start_time).await
+                                client.get_latest_media_for_camera(camera_id, search_after).await
                             };
 
                             match verification {
                                 Ok(remaining_ids) if remaining_ids.is_empty() => {
-                                    found = true;
                                     break;
                                 }
                                 _ => {}

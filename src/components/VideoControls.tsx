@@ -79,7 +79,9 @@ export function VideoControls({ videoRef, wrapperRef, isLive = false }: VideoCon
     videoRef.current.volume = val;
     videoRef.current.muted = val === 0;
     setVolume(val);
-    localStorage.setItem("blink_volume", val.toString());
+    try {
+      localStorage.setItem("blink_volume", val.toString());
+    } catch {}
   };
 
   const toggleFullscreen = useCallback((e: React.MouseEvent) => {
@@ -164,14 +166,14 @@ export function VideoControls({ videoRef, wrapperRef, isLive = false }: VideoCon
 
       {/* Control Bar Overlay */}
       <div 
-        className="bg-gradient-to-t from-black/90 via-black/40 to-transparent p-4 flex items-center gap-4 pointer-events-auto"
+        className="bg-gradient-to-t from-black/90 via-black/60 to-transparent p-4 flex items-center gap-4 pointer-events-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {!isLive && (
           <button 
             type="button"
             onClick={togglePlay}
-            className="text-white hover:text-blue-400 transition-colors"
+            className="text-white/90 hover:text-[var(--app-accent)] transition-colors"
           >
             {isPlaying ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current" />}
           </button>
@@ -181,7 +183,7 @@ export function VideoControls({ videoRef, wrapperRef, isLive = false }: VideoCon
           <button 
             type="button"
             onClick={toggleMute}
-            className="text-white hover:text-blue-400 transition-colors"
+            className="text-white/90 hover:text-[var(--app-accent)] transition-colors"
           >
             {isMuted || volume === 0 ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
           </button>
@@ -192,7 +194,7 @@ export function VideoControls({ videoRef, wrapperRef, isLive = false }: VideoCon
             step="0.05" 
             value={isMuted ? 0 : volume}
             onChange={handleVolumeChange}
-            className="w-20 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-blue-500"
+            className="w-20 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-[var(--app-accent)]"
           />
         </div>
 
@@ -202,7 +204,7 @@ export function VideoControls({ videoRef, wrapperRef, isLive = false }: VideoCon
           <button 
             type="button"
             onClick={togglePip}
-            className="text-white hover:text-blue-400 transition-colors"
+            className="text-white/90 hover:text-[var(--app-accent)] transition-colors"
             title="Pop out"
           >
             <PictureInPicture className="w-5 h-5" />
@@ -210,7 +212,7 @@ export function VideoControls({ videoRef, wrapperRef, isLive = false }: VideoCon
           <button 
             type="button"
             onClick={toggleFullscreen}
-            className="text-white hover:text-blue-400 transition-colors"
+            className="text-white/90 hover:text-[var(--app-accent)] transition-colors"
             title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
           >
             {isFullscreen ? <Minimize className="w-6 h-6" /> : <Maximize className="w-6 h-6" />}

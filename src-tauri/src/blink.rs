@@ -426,10 +426,15 @@ impl BlinkClient {
     }
 
     pub async fn get_raw_media(&self) -> Result<String> {
+        self.get_raw_media_page(1, 30).await
+    }
+
+    pub async fn get_raw_media_page(&self, page: i64, since_days: i64) -> Result<String> {
         let (token, account_id) = self.auth()?;
-        let since = Utc::now() - Duration::days(30);
+        let safe_page = if page < 1 { 1 } else { page };
+        let since = Utc::now() - Duration::days(since_days.max(1));
         let timestamp = since.format("%Y-%m-%dT%H:%M:%S+00:00").to_string();
-        let url = format!("{}/api/v1/accounts/{}/media/changed?since={}&page=1", self.base_url, account_id, timestamp);
+        let url = format!("{}/api/v1/accounts/{}/media/changed?since={}&page={}", self.base_url, account_id, timestamp, safe_page);
         
         let res = self.client.get(&url)
             .header("Authorization", format!("Bearer {}", token))
@@ -530,18 +535,55 @@ impl BlinkClient {
         
         if let Some(media_list) = data["media"].as_array() {
             for item in media_list {
-                let item_device_id = item["device_id"].as_i64()
-                    .or_else(|| item["device_id"].as_str().and_then(|s| s.parse::<i64>().ok()));
-                    
-                if item_device_id == Some(camera_id) {
-                    // Check if created_at is actually after our session start
-                    if let Some(created_at_str) = item["created_at"].as_str() {
-                        if let Ok(created_at) = chrono::DateTime::parse_from_rfc3339(created_at_str) {
-                            if created_at.with_timezone(&Utc) >= after {
-                                if let Some(id) = item["id"].as_i64() {
-                                    ids.push(id);
-                                }
+                let mut device_match = false;
+                for key in ["device_id", "camera_id", "sensor_id"] {
+                    let item_device_id = item[key].as_i64()
+                        .or_else(|| item[key].as_str().and_then(|s| s.parse::<i64>().ok()));
+                    if item_device_id == Some(camera_id) {
+                        device_match = true;
+                        break;
+                    }
+                }
+                if !device_match {
+                    continue;
+                }
+
+                let mut created_at: Option<chrono::DateTime<Utc>> = None;
+                let created_candidates = ["created_at", "created_at_utc", "updated_at", "time"];
+                for key in created_candidates {
+                    if let Some(created_at_str) = item[key].as_str() {
+                        let parsed = chrono::DateTime::parse_from_rfc3339(created_at_str)
+                            .or_else(|_| chrono::DateTime::parse_from_str(created_at_str, "%Y-%m-%dT%H:%M:%S%z"))
+                            .or_else(|_| chrono::DateTime::parse_from_str(created_at_str, "%Y-%m-%dT%H:%M:%S%.f%z"))
+                            .or_else(|_| chrono::DateTime::parse_from_str(created_at_str, "%Y-%m-%dT%H:%M:%S%:z"))
+                            .or_else(|_| chrono::DateTime::parse_from_str(created_at_str, "%Y-%m-%dT%H:%M:%S%.f%:z"))
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .ok()
+                            .or_else(|| {
+                                chrono::NaiveDateTime::parse_from_str(created_at_str, "%Y-%m-%dT%H:%M:%S")
+                                    .or_else(|_| chrono::NaiveDateTime::parse_from_str(created_at_str, "%Y-%m-%d %H:%M:%S"))
+                                    .ok()
+                                    .map(|dt| chrono::DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc))
+                            });
+
+                        if let Some(dt) = parsed {
+                            created_at = Some(dt);
+                            break;
+                        }
+                        if let Ok(epoch) = created_at_str.parse::<i64>() {
+                            let ts = if created_at_str.len() > 10 { epoch / 1000 } else { epoch };
+                            if let Some(dt) = chrono::DateTime::<Utc>::from_timestamp(ts, 0) {
+                                created_at = Some(dt);
+                                break;
                             }
+                        }
+                    }
+                }
+
+                if let Some(created_at) = created_at {
+                    if created_at >= after {
+                        if let Some(id) = item["id"].as_i64() {
+                            ids.push(id);
                         }
                     }
                 }
@@ -553,25 +595,72 @@ impl BlinkClient {
     pub async fn delete_media(&self, media_ids: Vec<i64>) -> Result<()> {
         let (token, account_id) = self.auth()?;
         let url = format!("{}/api/v1/accounts/{}/media/delete", self.base_url, account_id);
-        let body = serde_json::json!({
-            "media_list": media_ids
-        });
-        
-        let res = self.client.post(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .json(&body)
-            .send()
-            .await?;
+        let payloads = vec![
+            serde_json::json!({ "media_list": media_ids }),
+            serde_json::json!({ "media_list": media_ids.iter().map(|id| serde_json::json!({ "id": id })).collect::<Vec<_>>() }),
+            serde_json::json!({ "media_list": media_ids.iter().map(|id| serde_json::json!({ "media_id": id })).collect::<Vec<_>>() }),
+        ];
 
-        // Blink often returns 500 even on successful deletion.
-        // We log the status but return Ok to let the verification logic in server.rs handle it.
-        let status = res.status();
-        if !status.is_success() {
-            let text = res.text().await.unwrap_or_default();
-            println!("Delete media returned status {}: {}", status, text);
+        let mut last_error: Option<String> = None;
+        for body in payloads {
+            let res = self.client.post(&url)
+                .header("Authorization", format!("Bearer {}", token))
+                .json(&body)
+                .send()
+                .await;
+
+            match res {
+                Ok(response) => {
+                    let status = response.status();
+                    if status.is_success() {
+                        return Ok(());
+                    }
+                    let text = response.text().await.unwrap_or_default();
+                    last_error = Some(format!("{} {}", status, text));
+                }
+                Err(e) => {
+                    last_error = Some(e.to_string());
+                }
+            }
         }
-        
-        Ok(())
+
+        Err(anyhow!(last_error.unwrap_or_else(|| "Delete failed".to_string())))
+    }
+
+    pub async fn delete_media_with_payloads(&self, media_ids: Vec<i64>, entries: Vec<serde_json::Value>) -> Result<()> {
+        let (token, account_id) = self.auth()?;
+        let url = format!("{}/api/v1/accounts/{}/media/delete", self.base_url, account_id);
+
+        let payloads = vec![
+            serde_json::json!({ "media_list": media_ids }),
+            serde_json::json!({ "media_list": media_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>() }),
+            serde_json::json!({ "media_list": entries }),
+        ];
+
+        let mut last_error: Option<String> = None;
+        for body in payloads {
+            let res = self.client.post(&url)
+                .header("Authorization", format!("Bearer {}", token))
+                .json(&body)
+                .send()
+                .await;
+
+            match res {
+                Ok(response) => {
+                    let status = response.status();
+                    if status.is_success() {
+                        return Ok(());
+                    }
+                    let text = response.text().await.unwrap_or_default();
+                    last_error = Some(format!("{} {}", status, text));
+                }
+                Err(e) => {
+                    last_error = Some(e.to_string());
+                }
+            }
+        }
+
+        Err(anyhow!(last_error.unwrap_or_else(|| "Delete failed".to_string())))
     }
 
     pub async fn get_command_status(&self, network_id: i64, command_id: i64) -> Result<serde_json::Value> {
@@ -589,11 +678,16 @@ impl BlinkClient {
     pub async fn get_thumbnail(&self, path: &str) -> Result<Vec<u8>> {
         let token = self.token()?;
         let url = self.resolve_url(path);
-
-        let res = self.client.get(&url)
+        let mut req = self.client.get(&url)
             .header("Authorization", format!("Bearer {}", token))
-            .send()
-            .await?;
+            .header("Accept", "image/*");
+
+        if let Ok(origin) = HeaderValue::from_str(&self.base_url) {
+            req = req.header(ORIGIN, origin.clone());
+            req = req.header(REFERER, origin);
+        }
+
+        let res = req.send().await?;
 
         Ok(res.bytes().await?.to_vec())
     }
@@ -642,5 +736,49 @@ impl BlinkClient {
             .await?;
 
         Ok(())
+    }
+
+    pub async fn set_network_liveview_save(&self, network_id: i64, enabled: bool) -> Result<()> {
+        let (token, account_id) = self.auth()?;
+        let endpoints = [
+            format!("{}/api/v1/accounts/{}/networks/{}/update", self.base_url, account_id, network_id),
+            format!("{}/network/{}/update", self.base_url, network_id),
+        ];
+        let payloads = [
+            serde_json::json!({ "lv_save": enabled }),
+            serde_json::json!({ "network": { "lv_save": enabled } }),
+        ];
+
+        let mut last_error: Option<String> = None;
+
+        for url in endpoints {
+            for payload in payloads.iter() {
+                let payload = payload.clone();
+                let res = self.client.post(&url)
+                    .header("Authorization", format!("Bearer {}", token))
+                    .json(&payload)
+                    .send()
+                    .await;
+
+                match res {
+                    Ok(response) => {
+                        if response.status() == 401 {
+                            return Err(anyhow!("AUTH_EXPIRED"));
+                        }
+                        if response.status().is_success() {
+                            return Ok(());
+                        }
+                        let status = response.status();
+                        let body = response.text().await.unwrap_or_default();
+                        last_error = Some(format!("{} {}", status, body));
+                    }
+                    Err(e) => {
+                        last_error = Some(e.to_string());
+                    }
+                }
+            }
+        }
+
+        Err(anyhow!(last_error.unwrap_or_else(|| "Failed to update lv_save".to_string())))
     }
 }
