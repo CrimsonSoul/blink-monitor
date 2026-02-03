@@ -65,15 +65,6 @@ pub struct LiveViewResponse {
     pub polling_interval: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Media {
-    pub id: i64,
-    pub device_name: String,
-    pub thumbnail: String,
-    pub media: String,
-    pub created_at: String,
-}
-
 pub struct BlinkClient {
     pub client: reqwest::Client,
     pub token: Option<String>,
