@@ -284,7 +284,6 @@ async fn proxy_live(
             }
         }
         
-        let mut packets_count = 0;
         let mut mpegts_started = false;
         let mut last_null_packet = std::time::Instant::now();
         
@@ -296,8 +295,6 @@ async fn proxy_live(
 
             match packet_res {
                 Ok(Ok((msg_type, payload))) => {
-                    packets_count += 1;
-                    
                     if msg_type == 0x00 && !payload.is_empty() {
                         if payload[0] == 0x47 {
                             if !mpegts_started {
