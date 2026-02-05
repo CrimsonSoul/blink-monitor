@@ -11,7 +11,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-ENV PORT=3000
+ENV PORT=3020
 ENV BLINK_DATA_DIR=/data
 
 WORKDIR /app
@@ -19,5 +19,5 @@ COPY --from=build /app/server/target/release/blink-monitor-server /usr/local/bin
 
 VOLUME ["/data"]
 
-EXPOSE 3000
+EXPOSE 3020
 CMD ["blink-monitor-server"]
