@@ -1,7 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
-import { resolveResource } from "@tauri-apps/api/path";
+import apiClient from "@/lib/apiClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,7 +29,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [dashboardNotice, setDashboardNotice] = useState<string | null>(null);
-  const [serverPort, setServerPort] = useState<number | null>(null);
+  const [mediaBaseUrl, setMediaBaseUrl] = useState<string | null>(null);
   const [playingItems, setPlayingItems] = useState<Map<number, { id: number, type: 'camera' | 'media', url: string, camera?: Camera }>>(new Map());
   const [recording, setRecording] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
@@ -117,11 +115,11 @@ function App() {
     setMediaPage(1);
     setMediaHasMore(true);
     try {
-      await invoke("logout");
+      await apiClient.logout();
       setCameras([]);
       setNetworks([]);
       setMedia([]);
-      setServerPort(null);
+      setMediaBaseUrl(null);
       setMediaThumbCache(new Map());
       setSelectedMediaIds(new Set());
       setSelectMode(false);
@@ -206,7 +204,7 @@ function App() {
   }, [pickMediaUrl, pickThumbnail]);
 
   const fetchMediaPage = useCallback(async (page: number) => {
-    const rawMedia = await invoke<string>("get_raw_media_page", { page, sinceDays: 30 });
+    const rawMedia = await apiClient.getRawMediaPage(page, 30);
     const parsedMedia = JSON.parse(rawMedia);
     return normalizeMediaItems(parsedMedia);
   }, [normalizeMediaItems]);
@@ -220,7 +218,7 @@ function App() {
     setLoading(true);
     const sessionToken = sessionTokenRef.current;
     try {
-      const rawHome = await invoke<string>("get_raw_homescreen");
+      const rawHome = await apiClient.getRawHomescreen();
       if (sessionTokenRef.current !== sessionToken) return;
       const parsedHome = JSON.parse(rawHome);
       
@@ -258,13 +256,13 @@ function App() {
           if (newOnes.length > 0) {
             setNewClipCount(prev => prev + newOnes.length);
             
-            const hasPermission = await isPermissionGranted();
+            const hasPermission = await apiClient.isNotificationPermissionGranted();
             if (hasPermission) {
               const payload = {
                 title: `${newOnes.length} new motion event(s)`,
                 body: newOnes.map(m => m.device_name).join(", ")
               };
-              sendNotification(notificationIconPath ? { ...payload, icon: notificationIconPath } : payload);
+              apiClient.sendNotification(notificationIconPath ? { ...payload, icon: notificationIconPath } : payload);
             }
           }
         }
@@ -324,7 +322,8 @@ function App() {
 
     while (attempt < maxAttempts) {
       try {
-        const port = await invoke<number>("get_server_port");
+        const port = await apiClient.getServerPort();
+        if (!port) throw new Error("Server not ready");
         return port;
       } catch (e) {
         attempt += 1;
@@ -339,14 +338,18 @@ function App() {
     async function init() {
       try {
         // Request notification permission in background
-        isPermissionGranted().then(granted => {
-          if (!granted) requestPermission();
+        apiClient.isNotificationPermissionGranted().then(granted => {
+          if (!granted) apiClient.requestNotificationPermission();
         });
 
-        const authed = await invoke<boolean>("check_auth");
+        const authed = await apiClient.checkAuth();
         if (authed) {
-          const port = await getServerPortWithRetry();
-          setServerPort(port);
+          if (apiClient.isDesktop) {
+            const port = await getServerPortWithRetry();
+            setMediaBaseUrl(apiClient.buildMediaBaseUrl(port));
+          } else {
+            setMediaBaseUrl(apiClient.buildMediaBaseUrl());
+          }
           await fetchData();
           setStep("dashboard");
         }
@@ -358,7 +361,7 @@ function App() {
   }, [fetchData, getServerPortWithRetry]);
 
   useEffect(() => {
-    resolveResource("icons/icon.png")
+    apiClient.resolveNotificationIcon()
       .then(setNotificationIconPath)
       .catch(() => setNotificationIconPath(null));
     if (import.meta.env.DEV) {
@@ -414,7 +417,7 @@ function App() {
 
   const toggleArm = useCallback(async (networkId: number, currentlyArmed: boolean) => {
     try {
-      await invoke("set_network_arm", { networkId, arm: !currentlyArmed });
+      await apiClient.setNetworkArm(networkId, !currentlyArmed);
       fetchData();
     } catch (e: any) {
       console.error(e);
@@ -423,7 +426,7 @@ function App() {
 
   const handleLiveView = useCallback(async (camera: Camera, isRestart = false) => {
     const networkId = (camera.network_id ?? (networks.length === 1 ? networks[0]?.id : undefined)) || undefined;
-    if (!networkId || !serverPort) {
+    if (!networkId || !mediaBaseUrl) {
       if (!networkId) {
         setDashboardNotice("Live view unavailable: missing network mapping for this camera.");
         window.setTimeout(() => setDashboardNotice(null), 4000);
@@ -432,7 +435,7 @@ function App() {
     }
     
     const nonce = isRestart ? `&ts=${Date.now()}` : "";
-    const url = `http://localhost:${serverPort}/live/${networkId}/${camera.id}/${camera.product_type}?serial=${camera.serial || ""}&record=${recording}${nonce}`;
+    const url = `${mediaBaseUrl}/live/${networkId}/${camera.id}/${camera.product_type}?serial=${camera.serial || ""}&record=${recording}${nonce}`;
     
     setPlayingItems(prev => {
       const next = new Map(prev);
@@ -452,7 +455,7 @@ function App() {
       });
       return next;
     });
-  }, [networks, serverPort, recording]);
+  }, [networks, mediaBaseUrl, recording]);
 
   const handleStop = useCallback((id?: number) => {
     setPlayingItems(prev => {
@@ -477,27 +480,27 @@ function App() {
         if (item.type === 'camera' && item.camera) {
           const camera = item.camera;
           const networkId = camera.network_id || networks[0]?.id;
-          if (networkId && serverPort) {
-            const url = `http://localhost:${serverPort}/live/${networkId}/${camera.id}/${camera.product_type}?serial=${camera.serial || ""}&record=${nextRecording}`;
+          if (networkId && mediaBaseUrl) {
+            const url = `${mediaBaseUrl}/live/${networkId}/${camera.id}/${camera.product_type}?serial=${camera.serial || ""}&record=${nextRecording}`;
             next.set(id, { ...item, url });
           }
         }
       }
       return next;
     });
-  }, [recording, networks, serverPort]);
+  }, [recording, networks, mediaBaseUrl]);
 
   const handlePlayMedia = useCallback(async (item: Media) => {
-    if (!serverPort) return;
+    if (!mediaBaseUrl) return;
     const mediaUrl = item.media_url || (typeof item.media === "string" ? item.media : "");
     if (!mediaUrl) return;
-    const url = `http://localhost:${serverPort}/proxy?url=${encodeURIComponent(mediaUrl)}`;
+    const url = `${mediaBaseUrl}/proxy?url=${encodeURIComponent(mediaUrl)}`;
     setPlayingItems(new Map([[item.id, {
       id: item.id,
       type: 'media',
       url
     }]]));
-  }, [serverPort]);
+  }, [mediaBaseUrl]);
 
   useEffect(() => {
     if (step !== "dashboard") return;
@@ -566,7 +569,7 @@ function App() {
     setDeletingSelected(true);
     try {
       const selectedItems = media.filter(item => selectedMediaIds.has(item.id));
-      const remaining = await invoke<number[]>("delete_media_items", { items: selectedItems });
+      const remaining = await apiClient.deleteMediaItems(selectedItems);
       const selectedIds = Array.from(selectedMediaIds);
       const remainingSet = new Set(remaining);
       const deletedIds = selectedIds.filter(id => !remainingSet.has(id));
@@ -639,7 +642,7 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     async function fillThumbCache() {
-      if (!serverPort) return;
+      if (!mediaBaseUrl) return;
       for (const cam of cameras) {
         if (!cam.thumbnail) continue;
         if (thumbCache.has(cam.thumbnail)) continue;
@@ -654,7 +657,7 @@ function App() {
             });
             continue;
           }
-          const dataUrl = await invoke<string>("get_thumbnail_base64", { path: cam.thumbnail });
+          const dataUrl = await apiClient.getThumbnailBase64(cam.thumbnail);
           if (cancelled) return;
           setThumbCache(prev => {
             if (prev.has(cam.thumbnail)) return prev;
@@ -679,18 +682,18 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [cameras, serverPort, thumbCache, pruneThumbStorage, safeSetItem]);
+  }, [cameras, mediaBaseUrl, thumbCache, pruneThumbStorage, safeSetItem]);
 
   useEffect(() => {
     let cancelled = false;
     async function fillMediaThumbCache() {
-      if (!serverPort) return;
+      if (!mediaBaseUrl) return;
       for (const item of media) {
         const thumbPath = item.thumbnail_url || (typeof item.thumbnail === "string" ? item.thumbnail : "");
         if (!thumbPath) continue;
         if (mediaThumbCache.has(thumbPath)) continue;
         try {
-          const dataUrl = await invoke<string>("get_thumbnail_base64", { path: thumbPath });
+          const dataUrl = await apiClient.getThumbnailBase64(thumbPath);
           if (cancelled) return;
           setMediaThumbCache(prev => {
             if (prev.has(thumbPath)) return prev;
@@ -712,18 +715,22 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [media, serverPort, mediaThumbCache]);
+  }, [media, mediaBaseUrl, mediaThumbCache]);
 
   async function handleLogin() {
     setLoading(true);
     setError("");
     try {
-      const result = await invoke<string>("login", { email, password });
+      const result = await apiClient.login(email, password);
       if (result === "2FA_REQUIRED") {
         setStep("pin");
       } else {
-        const port = await getServerPortWithRetry();
-        setServerPort(port);
+        if (apiClient.isDesktop) {
+          const port = await getServerPortWithRetry();
+          setMediaBaseUrl(apiClient.buildMediaBaseUrl(port));
+        } else {
+          setMediaBaseUrl(apiClient.buildMediaBaseUrl());
+        }
         await fetchData();
         setStep("dashboard");
       }
@@ -738,9 +745,13 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      await invoke("verify_pin", { pin });
-      const port = await getServerPortWithRetry();
-      setServerPort(port);
+      await apiClient.verifyPin(pin);
+      if (apiClient.isDesktop) {
+        const port = await getServerPortWithRetry();
+        setMediaBaseUrl(apiClient.buildMediaBaseUrl(port));
+      } else {
+        setMediaBaseUrl(apiClient.buildMediaBaseUrl());
+      }
       await fetchData();
       setStep("dashboard");
     } catch (e: any) {
@@ -938,7 +949,7 @@ function App() {
                     <CameraCard 
                       camera={camera} 
                       onLiveView={handleLiveView} 
-                      serverPort={serverPort}
+                      mediaBaseUrl={mediaBaseUrl}
                       isPlaying={isLive}
                       playUrl={playingItems.get(camera.id)?.url}
                       suppressLivePlayback={theaterMode && playingItem?.type === 'camera' && playingItem.id === camera.id}
@@ -972,7 +983,7 @@ function App() {
             <TimelineView 
               media={media}
               onPlay={handlePlayMedia}
-              serverPort={serverPort}
+              mediaBaseUrl={mediaBaseUrl}
               playingItem={playingItem}
               onStop={() => handleStop()}
               mediaThumbCache={mediaThumbCache}

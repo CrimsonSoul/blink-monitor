@@ -26,3 +26,5 @@ dist-ssr
 # Tauri/Rust
 src-tauri/target
 src-tauri/gen/schemas
+server/target
+server/data

@@ -42,6 +42,44 @@ npm run tauri dev
 npm run tauri build
 ```
 
+---
+
+## Hosted Web App (VPS / EasyPanel)
+
+The web UI runs as static assets and talks to a standalone Rust API server that owns the Blink session.
+
+### Run the API locally
+```bash
+cd server
+cargo run --release
+```
+
+By default the API listens on `PORT=3000` and stores auth at `data/auth.json`.
+
+### Run the web UI against the API
+```bash
+VITE_TARGET=web VITE_API_BASE=/api npm run dev
+```
+
+### EasyPanel deployment layout (recommended)
+- **Service 1: web**
+  - Build command: `npm ci && VITE_TARGET=web VITE_API_BASE=/api npm run build`
+  - Output dir: `dist`
+- **Service 2: api**
+  - Working dir: `server`
+  - Build command: `cargo build --release`
+  - Start command: `./target/release/blink-monitor-server`
+
+### Reverse proxy
+Route `/api/*` from the web host to the API service. This keeps the UI same‑origin and avoids CORS issues.
+
+### Optional environment variables (API)
+| Variable | Description |
+| --- | --- |
+| `PORT` | API listen port (default: 3000). |
+| `BLINK_DATA_DIR` | Directory for `auth.json` (default: `data`). |
+| `BLINK_AUTH_PATH` | Full path to `auth.json` (overrides `BLINK_DATA_DIR`). |
+
 **macOS outputs**
 - App bundle: `src-tauri/target/release/bundle/macos/Blink Monitor.app`
 - DMG: `src-tauri/target/release/bundle/dmg/Blink Monitor_*.dmg`
@@ -76,6 +114,12 @@ To run in GitHub Actions:
 | --- | --- |
 | `BLINK_IMMI_INSECURE_TLS=1` | Allow insecure TLS (debug builds only). |
 | `BLINK_IMMI_SECURE_ONLY=1` | Require strict TLS verification; no insecure fallback. |
+
+### Web Build
+| Variable | Description |
+| --- | --- |
+| `VITE_TARGET=web` | Enable hosted web mode (uses HTTP API instead of Tauri). |
+| `VITE_API_BASE=/api` | Base path for API calls (default: `/api`). |
 
 ---
 

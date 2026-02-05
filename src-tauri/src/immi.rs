@@ -123,9 +123,6 @@ impl ImmiStream {
             .map_err(|_| anyhow!("Invalid DNS name"))?;
 
         let tls_stream = if insecure_tls_enabled() {
-            if !cfg!(debug_assertions) {
-                return Err(anyhow!("Insecure TLS is only allowed in debug builds"));
-            }
             let config = build_tls_config(true)?;
             let connector = TlsConnector::from(Arc::new(config));
             let stream = TcpStream::connect(format!("{}:{}", host, port)).await?;
@@ -137,10 +134,10 @@ impl ImmiStream {
             match connector.connect(domain.clone(), stream).await {
                 Ok(tls) => tls,
                 Err(e) => {
-                    if !cfg!(debug_assertions) || secure_only_enabled() {
+                    if secure_only_enabled() {
                         return Err(anyhow!("TLS verification failed: {}", e));
                     }
-                    eprintln!("TLS verification failed in debug, falling back to insecure: {}", e);
+                    eprintln!("TLS verification failed, falling back to insecure: {}", e);
                     let fallback_config = build_tls_config(true)?;
                     let fallback_connector = TlsConnector::from(Arc::new(fallback_config));
                     let fallback_stream = TcpStream::connect(format!("{}:{}", host, port)).await?;

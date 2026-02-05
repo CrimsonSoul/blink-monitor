@@ -473,14 +473,22 @@ impl BlinkClient {
         
         let path = match product_type {
             "tulip" | "doorbell" => format!("doorbells/{}", camera_id),
-            "owl" | "mini" => format!("owls/{}", camera_id),
+            "owl" | "mini" | "mini2" => format!("owls/{}", camera_id),
             _ => format!("cameras/{}", camera_id),
         };
 
-        let url = if product_type == "tulip" || product_type == "doorbell" || product_type == "owl" || product_type == "mini" {
+        let use_v1 = product_type == "tulip" 
+            || product_type == "doorbell" 
+            || product_type == "owl" 
+            || product_type == "mini" 
+            || product_type == "mini2"
+            || product_type == "indoor"
+            || product_type == "xt2";
+
+        let url = if use_v1 {
              format!("{}/api/v1/accounts/{}/networks/{}/{}/liveview", self.base_url, account_id, network_id, path)
         } else {
-             // v5 endpoint for sedona and standard cameras
+             // v5 endpoint for sedona and newer standard cameras
              format!("{}/api/v5/accounts/{}/networks/{}/cameras/{}/liveview", self.base_url, account_id, network_id, camera_id)
         };
         
@@ -494,9 +502,15 @@ impl BlinkClient {
             .send()
             .await?;
 
+        if !res.status().is_success() {
+            let status = res.status();
+            let text = res.text().await.unwrap_or_default();
+            return Err(anyhow!("Liveview API returned {}: {}", status, text));
+        }
+
         let data: serde_json::Value = res.json().await?;
-        let server = data["server"].as_str().ok_or(anyhow!("No server in liveview response. Body: {}", data))?.to_string();
-        let command_id = data["command_id"].as_i64().ok_or(anyhow!("No command_id in response"))?;
+        let server = data["server"].as_str().ok_or(anyhow!("No 'server' field in liveview response. Response: {}", data))?.to_string();
+        let command_id = data["command_id"].as_i64().ok_or(anyhow!("No 'command_id' field in response. Response: {}", data))?;
         let polling_interval = data["polling_interval"].as_i64().unwrap_or(1);
 
         Ok(LiveViewResponse {

@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
-import { listen } from "@tauri-apps/api/event";
+import apiClient from "@/lib/apiClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Play, Square, Download, RefreshCw, Pause, Volume2, VolumeX, PictureInPicture, Maximize, Minimize, Image as ImageIcon } from "lucide-react";
@@ -21,7 +19,7 @@ export interface Media {
 interface MediaCardProps {
   item: Media;
   onPlay: (m: Media) => void;
-  serverPort: number | null;
+  mediaBaseUrl: string | null;
   isPlaying?: boolean;
   playUrl?: string | null;
   onStop?: () => void;
@@ -31,7 +29,7 @@ interface MediaCardProps {
   thumbnailDataUrl?: string;
 }
 
-export function MediaCard({ item, onPlay, serverPort, isPlaying, playUrl, onStop, selectMode, selected, onToggleSelect, thumbnailDataUrl }: MediaCardProps) {
+export function MediaCard({ item, onPlay, mediaBaseUrl, isPlaying, playUrl, onStop, selectMode, selected, onToggleSelect, thumbnailDataUrl }: MediaCardProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const downloadIdRef = useRef<string | null>(null);
@@ -44,8 +42,8 @@ export function MediaCard({ item, onPlay, serverPort, isPlaying, playUrl, onStop
   const [isFullscreen, setIsFullscreen] = useState(false);
   
   const thumbnailPath = item.thumbnail_url || (typeof item.thumbnail === "string" ? item.thumbnail : "");
-  const thumbUrl = serverPort && thumbnailPath 
-    ? `http://localhost:${serverPort}/thumbnail?url=${encodeURIComponent(thumbnailPath)}`
+  const thumbUrl = mediaBaseUrl && thumbnailPath 
+    ? `${mediaBaseUrl}/thumbnail?url=${encodeURIComponent(thumbnailPath)}`
     : null;
   const [thumbSrc, setThumbSrc] = useState<string | null>(thumbnailDataUrl || thumbUrl);
   const [thumbFallbackTried, setThumbFallbackTried] = useState(false);
@@ -69,7 +67,7 @@ export function MediaCard({ item, onPlay, serverPort, isPlaying, playUrl, onStop
         setThumbSrc(cached);
         return;
       }
-      const dataUrl = await invoke<string>("get_thumbnail_base64", { path: thumbnailPath });
+      const dataUrl = await apiClient.getThumbnailBase64(thumbnailPath);
       setThumbSrc(dataUrl);
     } catch {
       setThumbSrc(null);
@@ -77,12 +75,12 @@ export function MediaCard({ item, onPlay, serverPort, isPlaying, playUrl, onStop
   }, [thumbFallbackTried, item.thumbnail, item.thumbnail_url, thumbnailPath]);
 
   useEffect(() => {
-    const unlistenPromise = listen<{
-      id: string;
-      received: number;
-      total?: number;
-    }>("download-progress", (event) => {
-      const { id, received, total } = event.payload;
+    let active = true;
+    let cleanup: (() => void) | null = null;
+
+    apiClient.onDownloadProgress((event) => {
+      if (!active) return;
+      const { id, received, total } = event;
       if (downloadIdRef.current !== id) return;
       if (total && total > 0) {
         const pct = Math.min(100, Math.round((received / total) * 100));
@@ -90,9 +88,17 @@ export function MediaCard({ item, onPlay, serverPort, isPlaying, playUrl, onStop
       } else {
         setDownloadProgress(0);
       }
-    });
+    }).then((unlisten) => {
+      if (!active) {
+        unlisten();
+        return;
+      }
+      cleanup = unlisten;
+    }).catch(() => {});
+
     return () => {
-      unlistenPromise.then((unlisten) => unlisten()).catch(() => {});
+      active = false;
+      if (cleanup) cleanup();
     };
   }, []);
 
@@ -198,25 +204,25 @@ export function MediaCard({ item, onPlay, serverPort, isPlaying, playUrl, onStop
     e.stopPropagation();
     try {
       const fileName = `${item.device_name.replace(/[^a-z0-9]/gi, '_')}_${item.created_at.replace(/[:.]/g, '-')}.mp4`;
-      const path = await save({
-        defaultPath: fileName,
-        filters: [{ name: 'Video', extensions: ['mp4'] }]
+      const mediaUrl = item.media_url || (typeof item.media === "string" ? item.media : "");
+      if (!mediaUrl) {
+        setDownloadError("Missing clip URL.");
+        return;
+      }
+      const downloadId = (typeof crypto !== "undefined" && "randomUUID" in crypto)
+        ? crypto.randomUUID()
+        : `${item.id}-${Date.now()}`;
+      downloadIdRef.current = downloadId;
+      setDownloadError(null);
+      setDownloadProgress(0);
+      setDownloading(true);
+      const completed = await apiClient.downloadClip({
+        url: mediaUrl,
+        defaultFileName: fileName,
+        downloadId,
+        onProgress: (pct) => setDownloadProgress(pct)
       });
-
-      if (path) {
-        const mediaUrl = item.media_url || (typeof item.media === "string" ? item.media : "");
-        if (!mediaUrl) {
-          setDownloadError("Missing clip URL.");
-          return;
-        }
-        const downloadId = (typeof crypto !== "undefined" && "randomUUID" in crypto)
-          ? crypto.randomUUID()
-          : `${item.id}-${Date.now()}`;
-        downloadIdRef.current = downloadId;
-        setDownloadError(null);
-        setDownloadProgress(0);
-        setDownloading(true);
-        await invoke("download_clip_with_progress", { url: mediaUrl, path, download_id: downloadId });
+      if (completed) {
         setDownloadProgress(100);
       }
     } catch (e) {

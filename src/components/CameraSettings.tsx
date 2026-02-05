@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import apiClient from "@/lib/apiClient";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Save } from "lucide-react";
@@ -23,7 +23,7 @@ export function CameraSettings({ isOpen, onClose, networkId, cameraId, productTy
     setLoading(true);
     setError(null);
     try {
-      const res = await invoke<any>("get_camera_config", { networkId, cameraId, productType });
+      const res = await apiClient.getCameraConfig(networkId, cameraId, productType);
       setConfig(res.camera || res);
     } catch (e: any) {
       setError(e.toString());
@@ -45,7 +45,7 @@ export function CameraSettings({ isOpen, onClose, networkId, cameraId, productTy
       const payload = productType === "owl" || productType === "mini" || productType === "tulip" || productType === "doorbell"
         ? config
         : { camera: config };
-      await invoke("update_camera_config", { networkId, cameraId, productType, config: payload });
+      await apiClient.updateCameraConfig(networkId, cameraId, productType, payload);
       onClose();
     } catch (e: any) {
       setError(e.toString());
