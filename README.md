@@ -82,6 +82,14 @@ docker build -t blink-monitor-web --build-arg VITE_API_BASE=/api .
 docker build -t blink-monitor-api -f server/Dockerfile .
 ```
 
+### Docker Compose (optional)
+```bash
+docker compose up --build
+```
+
+Web UI: http://localhost:8080
+API: http://localhost:3000
+
 ### Optional environment variables (API)
 | Variable | Description |
 | --- | --- |
