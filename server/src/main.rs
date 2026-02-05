@@ -102,7 +102,7 @@ async fn main() {
     .with_state(state)
     .layer(cors);
 
-  let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+  let port = std::env::var("PORT").unwrap_or_else(|_| "3020".to_string());
   let addr = format!("0.0.0.0:{}", port);
   let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
   println!("Blink Monitor API listening on {}", addr);

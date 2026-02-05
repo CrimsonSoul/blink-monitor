@@ -54,7 +54,7 @@ cd server
 cargo run --release
 ```
 
-By default the API listens on `PORT=3000` and stores auth at `data/auth.json`.
+By default the API listens on `PORT=3020` and stores auth at `data/auth.json`.
 
 ### Run the web UI against the API
 ```bash
@@ -69,9 +69,16 @@ VITE_TARGET=web VITE_API_BASE=/api npm run dev
   - Working dir: `server`
   - Build command: `cargo build --release`
   - Start command: `./target/release/blink-monitor-server`
+  - Port: `3020`
 
 ### Reverse proxy
 Route `/api/*` from the web host to the API service. This keeps the UI same‑origin and avoids CORS issues.
+
+### EasyPanel quick setup (Docker Compose)
+- Upload this repo and select the `docker-compose.yml` deployment option.
+- Ensure the API service exposes port `3020`.
+- Map your public domain to the `web` service (port `8080` internally or `80` depending on your EasyPanel config).
+- Data persists in `server/data` (mounted to `/data` inside the API container).
 
 ### Docker builds (optional)
 ```bash
@@ -88,12 +95,12 @@ docker compose up --build
 ```
 
 Web UI: http://localhost:8080
-API: http://localhost:3000
+API: http://localhost:3020
 
 ### Optional environment variables (API)
 | Variable | Description |
 | --- | --- |
-| `PORT` | API listen port (default: 3000). |
+| `PORT` | API listen port (default: 3020). |
 | `BLINK_DATA_DIR` | Directory for `auth.json` (default: `data`). |
 | `BLINK_AUTH_PATH` | Full path to `auth.json` (overrides `BLINK_DATA_DIR`). |
 
