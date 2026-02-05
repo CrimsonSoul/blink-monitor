@@ -73,6 +73,15 @@ VITE_TARGET=web VITE_API_BASE=/api npm run dev
 ### Reverse proxy
 Route `/api/*` from the web host to the API service. This keeps the UI same‑origin and avoids CORS issues.
 
+### Docker builds (optional)
+```bash
+# Web UI
+docker build -t blink-monitor-web --build-arg VITE_API_BASE=/api .
+
+# API server
+docker build -t blink-monitor-api -f server/Dockerfile .
+```
+
 ### Optional environment variables (API)
 | Variable | Description |
 | --- | --- |
