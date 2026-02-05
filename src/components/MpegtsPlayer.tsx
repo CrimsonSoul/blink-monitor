@@ -104,7 +104,15 @@ export function MpegtsPlayer({
         console.error("mpegts error", type, detail, info);
         const statusCode = info?.code ? ` ${info.code}` : "";
         const statusMsg = info?.msg ? ` ${info.msg}` : "";
-        const message = `Stream Error: ${type} (${detail})${statusCode}${statusMsg}`;
+        let message = `Stream Error: ${type} (${detail})${statusCode}${statusMsg}`;
+        
+        // If we have a 500 error, try to extract the more detailed message from the body if possible
+        // Note: mpegts.js might not always provide the body in info.msg for 500s, 
+        // but we'll try to make it as helpful as possible.
+        if (info?.code === 500 && info?.msg) {
+          message = `Backend Error: ${info.msg}`;
+        }
+        
         setError(message);
         setLoading(false);
 

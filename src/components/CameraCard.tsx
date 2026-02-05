@@ -27,7 +27,7 @@ export interface Camera {
 interface CameraCardProps {
   camera: Camera;
   onLiveView: (cam: Camera) => void;
-  serverPort: number | null;
+  mediaBaseUrl: string | null;
   isPlaying?: boolean;
   playUrl?: string | null;
   onStop?: () => void;
@@ -40,15 +40,15 @@ interface CameraCardProps {
   suppressLivePlayback?: boolean;
 }
 
-export function CameraCard({ camera, onLiveView, serverPort, isPlaying, playUrl, onStop, recording, onToggleRecording, onTheaterMode, isFavorite, onToggleFavorite, thumbnailDataUrl, suppressLivePlayback }: CameraCardProps) {
+export function CameraCard({ camera, onLiveView, mediaBaseUrl, isPlaying, playUrl, onStop, recording, onToggleRecording, onTheaterMode, isFavorite, onToggleFavorite, thumbnailDataUrl, suppressLivePlayback }: CameraCardProps) {
   const [streamStatus, setStreamStatus] = useState<string>("");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
-  const thumbUrl = serverPort && camera.thumbnail 
-    ? `http://localhost:${serverPort}/thumbnail?url=${encodeURIComponent(camera.thumbnail)}`
+  const thumbUrl = mediaBaseUrl && camera.thumbnail 
+    ? `${mediaBaseUrl}/thumbnail?url=${encodeURIComponent(camera.thumbnail)}`
     : null;
   const effectiveThumbUrl = thumbnailDataUrl || thumbUrl;
 

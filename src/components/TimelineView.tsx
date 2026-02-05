@@ -6,7 +6,7 @@ import { Film } from "lucide-react";
 interface TimelineViewProps {
   media: Media[];
   onPlay: (m: Media) => void;
-  serverPort: number | null;
+  mediaBaseUrl: string | null;
   playingItem: { id: number; type: string } | null;
   onStop: () => void;
   mediaThumbCache?: Map<string, string>;
@@ -23,7 +23,7 @@ interface TimelineViewProps {
   loadingMore?: boolean;
 }
 
-export function TimelineView({ media, onPlay, serverPort, playingItem, onStop, mediaThumbCache, selectMode, selectedIds, onToggleSelect, onSelectAll, onClearSelection, onDeleteSelected, deletingSelected, onToggleSelectMode, hasMore, onLoadMore, loadingMore }: TimelineViewProps) {
+export function TimelineView({ media, onPlay, mediaBaseUrl, playingItem, onStop, mediaThumbCache, selectMode, selectedIds, onToggleSelect, onSelectAll, onClearSelection, onDeleteSelected, deletingSelected, onToggleSelectMode, hasMore, onLoadMore, loadingMore }: TimelineViewProps) {
   const [search, setSearch] = useState("");
   const [deviceFilter, setDeviceFilter] = useState("all");
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
@@ -177,7 +177,7 @@ export function TimelineView({ media, onPlay, serverPort, playingItem, onStop, m
                 key={item.id} 
                 item={item} 
                 onPlay={onPlay} 
-                serverPort={serverPort}
+                mediaBaseUrl={mediaBaseUrl}
                 isPlaying={playingItem?.id === item.id && playingItem?.type === 'media'}
                 playUrl={playingItem?.id === item.id ? (playingItem as any).url : null}
                 onStop={onStop}

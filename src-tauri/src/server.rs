@@ -173,12 +173,13 @@ async fn proxy_live(
             },
             Err(e) => {
                 let err_msg = e.to_string();
+                eprintln!("Liveview request failed: {}", err_msg);
                 if err_msg.contains("307") || err_msg.contains("busy") {
                     tokio::time::sleep(std::time::Duration::from_secs(4)).await;
                     retries += 1;
                     continue;
                 } else {
-                    return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+                    return (StatusCode::INTERNAL_SERVER_ERROR, format!("Blink API Error: {}", err_msg)).into_response();
                 }
             }
         }
@@ -195,7 +196,8 @@ async fn proxy_live(
             s
         },
         Err(e) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+            eprintln!("IMMI connection failed: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("IMMI Connection Failed: {}", e)).into_response();
         }
     };
 
@@ -286,6 +288,7 @@ async fn proxy_live(
         
         let mut mpegts_started = false;
         let mut last_null_packet = std::time::Instant::now();
+        let stream_start_time = std::time::Instant::now();
         
         loop {
             let packet_res = tokio::select! {
@@ -299,6 +302,7 @@ async fn proxy_live(
                         if payload[0] == 0x47 {
                             if !mpegts_started {
                                 mpegts_started = true;
+                                eprintln!("First MPEG-TS packet received after {}ms", stream_start_time.elapsed().as_millis());
                             }
                             if tx_clone.send(Ok(axum::body::Bytes::from(payload))).await.is_err() {
                                 break;
@@ -313,12 +317,20 @@ async fn proxy_live(
                         last_null_packet = std::time::Instant::now();
                     }
                 }
-                Ok(Err(_)) => {
+                Ok(Err(e)) => {
+                    eprintln!("IMMI read error: {}", e);
                     break;
                 }
                 Err(_) => {
+                    eprintln!("IMMI read timeout");
                     break;
                 }
+            }
+            
+            // If we've been waiting more than 35 seconds without any data, bail
+            if !mpegts_started && stream_start_time.elapsed().as_secs() > 35 {
+                eprintln!("Stream timed out waiting for data");
+                break;
             }
         }
         token_reader.cancel();
