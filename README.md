@@ -1,158 +1,88 @@
 # Blink Monitor
 
-Modern, minimal desktop client for Blink cameras built with **Tauri + React**.  
-Designed for fast live view, clean clip browsing, and a sleek dark‑mode UI.
+Blink Monitor is a desktop-first client for Amazon Blink cameras, with an optional hosted web runtime for server deployments.
 
-## Highlights
-- Live view with theater mode, PiP, mute/unmute, and recording controls
-- Clips timeline with search, filters, multi‑select delete, and download with progress
-- Notifications for new motion events (with app icon)
-- Fast local thumbnail caching and resilient media loading
-- Secure storage via OS keychain (with dev‑mode override)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-0a7ea4) ![UI](https://img.shields.io/badge/ui-React%2019-149eca) ![Runtime](https://img.shields.io/badge/runtime-Tauri%20v2%20%7C%20Axum-1f6feb) ![Language](https://img.shields.io/badge/language-TypeScript%20%2B%20Rust-2ea043)
+
+## Snapshot
+
+- One React UI runs in two modes: desktop (Tauri IPC) and hosted web (HTTP API)
+- Rust services handle Blink auth, media proxying, and IMMI live streaming relay
+- Built for fast clip browsing, responsive live view, and practical daily monitoring
+- Deployment paths include desktop bundles, Docker Compose, and CI Windows portable build
+
+## Preview
+
+![Blink Monitor icon](src-tauri/icons/128x128.png)
+
+## Core Features
+
+- Live camera view with theater mode, PiP, mute/unmute, and stream retry
+- Clip timeline with search/filtering, multi-select delete, and downloads with progress
+- Motion notifications with app icon support
+- Camera arm/disarm and settings management
+- Local thumbnail caching for faster repeat browsing
+
+## Architecture
+
+- `src/lib/apiClient.ts` abstracts runtime differences so components call one client API
+- Desktop mode routes through Tauri commands in `src-tauri/src/`
+- Hosted mode routes through standalone Axum handlers in `server/src/`
 
 ## Tech Stack
-- **Tauri v2** (Rust backend)
-- **React 19 + Vite**
-- **TypeScript**
-- **mpegts.js** for live stream playback
 
----
+| Layer | Technology |
+| --- | --- |
+| Frontend | React 19, TypeScript, Vite 7, Tailwind CSS 4 |
+| Desktop runtime | Tauri v2 (Rust) |
+| Hosted API | Axum (Rust) |
+| Live playback | mpegts.js |
+| Networking | reqwest + rustls |
 
-## Getting Started
+## Quick Start
 
-### Prerequisites
-- **Node.js 20+**
-- **Rust toolchain** (stable)
-- **Tauri prerequisites** for your OS  
-  - macOS: Xcode Command Line Tools
-  - Windows: MSVC build tools + WebView2 runtime
+### Desktop
 
-### Install
 ```bash
 npm ci
-```
-
-### Run (dev)
-```bash
 npm run tauri dev
 ```
 
-### Build (production)
-```bash
-npm run tauri build
-```
+### Hosted web mode
 
----
-
-## Hosted Web App (VPS / EasyPanel)
-
-The web UI runs as static assets and talks to a standalone Rust API server that owns the Blink session.
-
-### Run the API locally
 ```bash
 cd server
 cargo run --release
 ```
 
-By default the API listens on `PORT=3020` and stores auth at `data/auth.json`.
-
-### Run the web UI against the API
 ```bash
 VITE_TARGET=web VITE_API_BASE=/api npm run dev
 ```
 
-### EasyPanel deployment layout (recommended)
-- **Service 1: web**
-  - Build command: `npm ci && VITE_TARGET=web VITE_API_BASE=/api npm run build`
-  - Output dir: `dist`
-- **Service 2: api**
-  - Working dir: `server`
-  - Build command: `cargo build --release`
-  - Start command: `./target/release/blink-monitor-server`
-  - Port: `3020`
+### Docker
 
-### Reverse proxy
-Route `/api/*` from the web host to the API service. This keeps the UI same‑origin and avoids CORS issues.
-
-### EasyPanel quick setup (Docker Compose)
-- Upload this repo and select the `docker-compose.yml` deployment option.
-- Ensure the API service exposes port `3020`.
-- Map your public domain to the `web` service (port `8080` internally or `80` depending on your EasyPanel config).
-- Data persists in `server/data` (mounted to `/data` inside the API container).
-
-### Docker builds (optional)
-```bash
-# Web UI
-docker build -t blink-monitor-web --build-arg VITE_API_BASE=/api .
-
-# API server
-docker build -t blink-monitor-api -f server/Dockerfile .
-```
-
-### Docker Compose (optional)
 ```bash
 docker compose up --build
 ```
 
-Web UI: http://localhost:8080
-API: http://localhost:3020
+Web UI: `http://localhost:8080`  
+API: `http://localhost:3020`
 
-### Optional environment variables (API)
-| Variable | Description |
-| --- | --- |
-| `PORT` | API listen port (default: 3020). |
-| `BLINK_DATA_DIR` | Directory for `auth.json` (default: `data`). |
-| `BLINK_AUTH_PATH` | Full path to `auth.json` (overrides `BLINK_DATA_DIR`). |
+## Security and Reliability
 
-**macOS outputs**
-- App bundle: `src-tauri/target/release/bundle/macos/Blink Monitor.app`
-- DMG: `src-tauri/target/release/bundle/dmg/Blink Monitor_*.dmg`
+- Desktop auth tokens default to OS keychain storage
+- Proxy endpoints enforce Blink-domain allowlisting to reduce SSRF risk
+- PKCE OAuth flow for authentication
+- TLS behavior is configurable for secure-only vs debug scenarios
 
----
+## Project Layout
 
-## Windows Portable Build (GitHub Actions)
-The workflow produces a **portable self‑contained `.exe`** (no installer).
-
-Artifact path in CI:
-- `src-tauri/target/release/*.exe`
-
-Workflow file:
-- `.github/workflows/windows-build.yml`
-
-To run in GitHub Actions:
-- **Actions → Windows Build → Run workflow**
-
----
-
-## Environment Variables
-
-### Auth / Storage
-| Variable | Description |
-| --- | --- |
-| `BLINK_DISABLE_KEYCHAIN=1` | Disable OS keychain use (dev convenience). |
-| `BLINK_USE_KEYCHAIN=1` | Force keychain use. |
-| `BLINK_ALLOW_PLAINTEXT_AUTH=1` | Allow plaintext fallback storage if keychain fails. |
-
-### IMMI TLS (Live View)
-| Variable | Description |
-| --- | --- |
-| `BLINK_IMMI_INSECURE_TLS=1` | Allow insecure TLS (debug builds only). |
-| `BLINK_IMMI_SECURE_ONLY=1` | Require strict TLS verification; no insecure fallback. |
-
-### Web Build
-| Variable | Description |
-| --- | --- |
-| `VITE_TARGET=web` | Enable hosted web mode (uses HTTP API instead of Tauri). |
-| `VITE_API_BASE=/api` | Base path for API calls (default: `/api`). |
-
----
-
-## Notes & Tips
-- **macOS notification icons are cached** by the OS.  
-  If you update the icon, fully quit and relaunch the app to see the change.
-- If live view fails, try the **Retry Stream** button before reloading the app.
-
----
+- `src/`: React frontend and UI components
+- `src/lib/apiClient.ts`: shared API facade (IPC vs HTTP)
+- `src-tauri/src/`: desktop Rust commands and embedded proxy
+- `server/src/`: standalone Axum API for hosted mode
+- `.github/workflows/windows-build.yml`: Windows portable build pipeline
 
 ## License
-Private / internal project.
+
+Private/internal project.
