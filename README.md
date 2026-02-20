@@ -7,27 +7,24 @@ Blink Monitor is a desktop-first client for Amazon Blink cameras, with an option
 ## Snapshot
 
 - One React UI runs in two modes: desktop (Tauri IPC) and hosted web (HTTP API)
-- Rust services handle Blink auth, media proxying, and IMMI live streaming relay
+- Rust services handle Blink auth, media proxying, and live streaming relay
 - Built for fast clip browsing, responsive live view, and practical daily monitoring
-- Deployment paths include desktop bundles, Docker Compose, and CI Windows portable build
-
-## Preview
-
-![Blink Monitor icon](src-tauri/icons/128x128.png)
+- Deployment paths include desktop bundles, Docker Compose, and a CI Windows portable build
 
 ## Core Features
 
-- Live camera view with theater mode, PiP, mute/unmute, and stream retry
-- Clip timeline with search/filtering, multi-select delete, and downloads with progress
-- Motion notifications with app icon support
+- Live camera view with theater mode, picture-in-picture, mute/unmute, and stream retry
+- Clip timeline with search and filtering, multi-select delete, and progress-tracked downloads
+- Motion notifications with app icon badging
 - Camera arm/disarm and settings management
 - Local thumbnail caching for faster repeat browsing
 
 ## Architecture
 
-- `src/lib/apiClient.ts` abstracts runtime differences so components call one client API
-- Desktop mode routes through Tauri commands in `src-tauri/src/`
-- Hosted mode routes through standalone Axum handlers in `server/src/`
+- `src/lib/apiClient.ts` abstracts runtime differences so components call one unified client API
+- Desktop mode routes requests through Tauri commands in `src-tauri/src/`
+- Hosted mode routes through a standalone Axum REST API in `server/src/`
+- The same React UI and component tree runs in both modes without modification
 
 ## Tech Stack
 
@@ -51,11 +48,13 @@ npm run tauri dev
 ### Hosted web mode
 
 ```bash
+# Start the API server
 cd server
 cargo run --release
 ```
 
 ```bash
+# Start the frontend in web mode
 VITE_TARGET=web VITE_API_BASE=/api npm run dev
 ```
 
@@ -65,24 +64,23 @@ VITE_TARGET=web VITE_API_BASE=/api npm run dev
 docker compose up --build
 ```
 
-Web UI: `http://localhost:8080`  
+Web UI: `http://localhost:8080`
 API: `http://localhost:3020`
 
-## Security and Reliability
+## Security
 
 - Desktop auth tokens default to OS keychain storage
 - Proxy endpoints enforce Blink-domain allowlisting to reduce SSRF risk
-- PKCE OAuth flow for authentication
-- TLS behavior is configurable for secure-only vs debug scenarios
+- TLS behavior is configurable for secure-only vs permissive debug scenarios
 
 ## Project Layout
 
 - `src/`: React frontend and UI components
-- `src/lib/apiClient.ts`: shared API facade (IPC vs HTTP)
+- `src/lib/apiClient.ts`: shared API facade (Tauri IPC vs HTTP)
 - `src-tauri/src/`: desktop Rust commands and embedded proxy
 - `server/src/`: standalone Axum API for hosted mode
-- `.github/workflows/windows-build.yml`: Windows portable build pipeline
+- `docker-compose.yml`: multi-container deployment config
 
 ## License
 
-Private/internal project.
+MIT
