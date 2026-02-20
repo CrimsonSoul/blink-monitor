@@ -11,10 +11,6 @@ Blink Monitor is a desktop-first client for Amazon Blink cameras, with an option
 - Built for fast clip browsing, responsive live view, and practical daily monitoring
 - Deployment paths include desktop bundles, Docker Compose, and a CI Windows portable build
 
-## Preview
-
-![Dashboard](docs/screenshots/dashboard.png)
-
 ## Core Features
 
 - Live camera view with theater mode, picture-in-picture, mute/unmute, and stream retry
